@@ -202,4 +202,13 @@ grid_search = GridSearchCV(lasso, param_grid, cv=5, scoring='neg_mean_squared_er
 grid_search.fit(X, y)
 
 print(grid_search.best_params_, math.sqrt(math.fabs(grid_search.best_score_)))
+score_dict = { 'Lasso' : math.sqrt(math.fabs(grid_search.best_score_))}
 
+ridge = Ridge()
+ridge_param_grid = { 'alpha': np.linspace(30,34, 300), 'max_iter' : [10000]}
+ridge_grid_search = GridSearchCV(ridge, ridge_param_grid, cv=5, scoring='neg_mean_squared_error', n_jobs=-1)
+ridge_grid_search.fit(X, y)
+
+print(ridge_grid_search.best_params_, math.sqrt(math.fabs(ridge_grid_search.best_score_)))
+
+score_dict['Ridge'] = math.sqrt(math.fabs(ridge_grid_search.best_score_))
