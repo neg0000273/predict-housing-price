@@ -7,6 +7,9 @@ from sklearn.preprocessing import scale
 from sklearn.metrics import mean_squared_error, make_scorer
 from sklearn.model_selection import GridSearchCV
 from sklearn.linear_model import Ridge, Lasso
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.svm import SVR
+import xgboost as xgb
 
 # Plotting
 import matplotlib.pyplot as plt
@@ -212,3 +215,37 @@ ridge_grid_search.fit(X, y)
 print(ridge_grid_search.best_params_, math.sqrt(math.fabs(ridge_grid_search.best_score_)))
 
 score_dict['Ridge'] = math.sqrt(math.fabs(ridge_grid_search.best_score_))
+
+rf = RandomForestRegressor()
+rf_param_grid = { 'n_estimators' : [1000], 'max_features' : [148]}
+rf_grid_search = GridSearchCV(rf, rf_param_grid, cv=5, scoring='neg_mean_squared_error', n_jobs=-1)
+rf_grid_search.fit(X,y)
+
+print(rf_grid_search.best_params_, math.sqrt(math.fabs(rf_grid_search.best_score_)))
+
+score_dict['Random Forest'] = math.sqrt(math.fabs(rf_grid_search.best_score_))
+
+svm = SVR()
+svm_param_grid = { 'gamma' : [0.00733333], 'C': np.linspace(1,1.1,10)}
+svm_grid_search = GridSearchCV(svm, svm_param_grid, cv=5, scoring='neg_mean_squared_error', n_jobs=-1)
+svm_grid_search.fit(X,y)
+
+print(svm_grid_search.best_params_, math.sqrt(math.fabs(svm_grid_search.best_score_)))
+
+score_dict['SVM'] = math.sqrt(math.fabs(svm_grid_search.best_score_))
+
+xgb_model = xgb.XGBRegressor()
+xgb_param_grid = { 'max_depth' : [4,5,6], 'eta' : [0.01], 'min_child_weight':[6], 'subsample': [0.5,1]}
+xgb_grid_search = GridSearchCV(xgb_model, xgb_param_grid, cv=5, scoring='neg_mean_squared_error', n_jobs=-1)
+xgb_grid_search.fit(X,y)
+
+print(xgb_grid_search.best_params_, math.sqrt(math.fabs(xgb_grid_search.best_score_)))
+
+score_dict['XGBoost'] = math.sqrt(math.fabs(xgb_grid_search.best_score_))
+
+# Predict using best model 
+svm_submission = pd.concat( [test.Id,pd.DataFrame(np.exp(svm_grid_search.predict(test_clean.drop('SalePrice', axis=1))))], axis=1)
+
+svm_submission.columns = ['Id','SalePrice']
+
+svm_submission.to_csv('submissions/svm_submission.csv',index=False)
