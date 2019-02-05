@@ -6,13 +6,9 @@ import math
 from sklearn.preprocessing import power_transform
 from sklearn.model_selection import GridSearchCV
 from sklearn.linear_model import Ridge, Lasso
-from sklearn.ensemble import RandomForestRegressor
+from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.svm import SVR
 import xgboost as xgb
-
-# Plotting
-import matplotlib.pyplot as plt
-import seaborn as sns
 
 train = pd.read_csv('input/train.csv')
 test = pd.read_csv('input/test.csv')
@@ -204,12 +200,12 @@ y = train_clean.SalePrice
 
 # Models - Lasso
 lasso = Lasso()
-param_grid = { 'alpha': np.linspace(0.0001,0.1, 300), 'max_iter' : [10000]}
-grid_search = GridSearchCV(lasso, param_grid, cv=5, scoring='neg_mean_squared_error', n_jobs=-1)
-grid_search.fit(X, y)
+lasso_param_grid = { 'alpha': np.linspace(0.0001,0.1, 300), 'max_iter' : [10000]}
+lasso_grid_search = GridSearchCV(lasso, lasso_param_grid, cv=5, scoring='neg_mean_squared_error', n_jobs=-1)
+lasso_grid_search.fit(X, y)
 
-print(grid_search.best_params_, math.sqrt(math.fabs(grid_search.best_score_)))
-score_dict = { 'Lasso' : math.sqrt(math.fabs(grid_search.best_score_))}
+print(lasso_grid_search.best_params_, math.sqrt(math.fabs(lasso_grid_search.best_score_)))
+score_dict = { 'Lasso' : math.sqrt(math.fabs(lasso_grid_search.best_score_))}
 
 ridge = Ridge()
 ridge_param_grid = { 'alpha': np.linspace(1,100, 300), 'max_iter' : [10000]}
@@ -220,14 +216,15 @@ print(ridge_grid_search.best_params_, math.sqrt(math.fabs(ridge_grid_search.best
 
 score_dict['Ridge'] = math.sqrt(math.fabs(ridge_grid_search.best_score_))
 
-rf = RandomForestRegressor()
-rf_param_grid = { 'n_estimators' : [1000], 'max_features' : [1,10,50,100,150,200]}
-rf_grid_search = GridSearchCV(rf, rf_param_grid, cv=5, scoring='neg_mean_squared_error', n_jobs=-1)
-rf_grid_search.fit(X,y)
+# GBM
+gbm = GradientBoostingRegressor(max_features = 'sqrt', learning_rate = 0.01)
+gbm_param_grid = { 'n_estimators' : [840],'max_depth': [8], 'min_samples_leaf' : [6], 'subsample' : [0.85], 'min_samples_split' : [6]}
+gbm_grid_search = GridSearchCV(gbm, gbm_param_grid, cv=5, scoring='neg_mean_squared_error', n_jobs=-1)
+gbm_grid_search.fit(X,y)
 
-print(rf_grid_search.best_params_, math.sqrt(math.fabs(rf_grid_search.best_score_)))
+print(gbm_grid_search.best_params_, math.sqrt(math.fabs(gbm_grid_search.best_score_)))
 
-score_dict['Random Forest'] = math.sqrt(math.fabs(rf_grid_search.best_score_))
+score_dict['GBM'] = math.sqrt(math.fabs(gbm_grid_search.best_score_))
 
 svm = SVR()
 svm_param_grid = { 'gamma' : np.linspace(0.0001,0.001,100), 'C': [4]}
@@ -239,7 +236,7 @@ print(svm_grid_search.best_params_, math.sqrt(math.fabs(svm_grid_search.best_sco
 score_dict['SVM'] = math.sqrt(math.fabs(svm_grid_search.best_score_))
 
 xgb_model = xgb.XGBRegressor()
-xgb_param_grid = { 'max_depth' : [4,5,6], 'eta' : [0.001], 'min_child_weight':[6], 'subsample': [0.5,1]}
+xgb_param_grid = {'learning_rate' : [0.01],'n_estimators' : [4000], 'max_depth' : [3], 'min_child_weight' : [5], 'gamma' : [0], 'subsample' : [0.7], 'colsample_bytree' : [0.8], 'reg_alpha':[0.00001]}
 xgb_grid_search = GridSearchCV(xgb_model, xgb_param_grid, cv=5, scoring='neg_mean_squared_error', n_jobs=-1)
 xgb_grid_search.fit(X,y)
 
@@ -247,9 +244,10 @@ print(xgb_grid_search.best_params_, math.sqrt(math.fabs(xgb_grid_search.best_sco
 
 score_dict['XGBoost'] = math.sqrt(math.fabs(xgb_grid_search.best_score_))
 
-# Predict using best model 
-submission = pd.concat( [test.Id,pd.DataFrame(np.exp(grid_search.predict(test_clean.drop('SalePrice', axis=1))))], axis=1)
+# Average the best five models to create a submission - 0.11784
+test_X = test_clean.drop('SalePrice',axis=1)
+test_Y = (np.exp(lasso_grid_search.predict(test_X)) + np.exp(ridge_grid_search.predict(test_X)) + np.exp(svm_grid_search.predict(test_X)) +  np.exp(xgb_grid_search.predict(test_X))) / 4
+avg_submission = pd.concat( [test.Id, pd.DataFrame(test_Y)], axis=1)
+avg_submission.columns = ['Id','SalePrice']
 
-submission.columns = ['Id','SalePrice']
-
-submission.to_csv('submissions/lasso_submission.csv',index=False)
+avg_submission.to_csv('submissions/avg_submission.csv',index=False)
