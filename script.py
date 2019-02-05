@@ -3,17 +3,12 @@ import pandas as pd
 
 import math
 
-from sklearn.preprocessing import scale
-from sklearn.metrics import mean_squared_error, make_scorer
+from sklearn.preprocessing import power_transform
 from sklearn.model_selection import GridSearchCV
 from sklearn.linear_model import Ridge, Lasso
-from sklearn.ensemble import RandomForestRegressor
+from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.svm import SVR
 import xgboost as xgb
-
-# Plotting
-import matplotlib.pyplot as plt
-import seaborn as sns
 
 train = pd.read_csv('input/train.csv')
 test = pd.read_csv('input/test.csv')
@@ -22,11 +17,14 @@ def cleanData(df):
     # Drop variables with little variance
     df = df.drop(['Id','Alley','Street', 'LotShape','Utilities', 'LandSlope','RoofMatl','Heating','Electrical','BsmtFinSF1','BsmtFinType2','BsmtFinSF2','LowQualFinSF','BsmtHalfBath','KitchenAbvGr', '3SsnPorch','ScreenPorch','PoolArea','PoolQC', 'MiscFeature', 'MiscVal'],axis=1)
     
+    # TotalSF variable
+    df.loc[:,'TotalSF'] = df['TotalBsmtSF'].apply(lambda x : 0 if pd.isna(x) else x) + df['1stFlrSF'] + df['2ndFlrSF']
+    
     # Convert some integral classes to categorical
     df.MSSubClass = df.MSSubClass.astype('str')
     df.MoSold = df.MoSold.astype('str')
     df.YrSold = df.YrSold.astype('str')
-    
+        
     # Bin rare categories
     df.loc[df.MSSubClass.isin(['180','75','45','40','150']),'MSSubClass'] = 'Other'
     df.loc[df.MSZoning.isin(['RH', 'C (all)']),'MSZoning'] = 'Other'
@@ -149,9 +147,11 @@ def cleanData(df):
     df.loc[df.Exterior1st.isna(),'Exterior1st'] = 'Other'
     df.loc[df.Exterior2nd.isna(),'Exterior2nd'] = 'Other'
     df.loc[df.MasVnrType.isna(),'MasVnrType'] = 'None'
-    
-    # Standardize all numeric variables
-    df = df.apply(lambda x : scale(x) if x.dtype.name != 'object' and x.name != 'SalePrice' else x)
+
+    # Apply Yeo-Johnson transformation to all numeric variables
+    for i in df.columns:
+        if df[i].dtype.name != 'object' and df[i].name != 'SalePrice':
+            df[i] = power_transform(df[i].values.reshape(-1,1),method='yeo-johnson')
     
     # One hot encode categoricals
     df = pd.get_dummies(df)
@@ -183,7 +183,7 @@ def cleanData(df):
     return [df[df.Type_train == 1], df[df.Type_test == 1]]
 
 # Dump train outliers
-train = train.loc[train['LotArea'] < 100000,:]
+train = train.drop(train[(train['GrLivArea']>4000) & (train['SalePrice']<300000)].index)
 
 train.loc[:,'Type'] = 'train'
 test.loc[:,'Type'] = 'test'
@@ -200,15 +200,15 @@ y = train_clean.SalePrice
 
 # Models - Lasso
 lasso = Lasso()
-param_grid = { 'alpha': np.linspace(0.0001,0.1, 300), 'max_iter' : [10000]}
-grid_search = GridSearchCV(lasso, param_grid, cv=5, scoring='neg_mean_squared_error', n_jobs=-1)
-grid_search.fit(X, y)
+lasso_param_grid = { 'alpha': np.linspace(0.0001,0.1, 300), 'max_iter' : [10000]}
+lasso_grid_search = GridSearchCV(lasso, lasso_param_grid, cv=5, scoring='neg_mean_squared_error', n_jobs=-1)
+lasso_grid_search.fit(X, y)
 
-print(grid_search.best_params_, math.sqrt(math.fabs(grid_search.best_score_)))
-score_dict = { 'Lasso' : math.sqrt(math.fabs(grid_search.best_score_))}
+print(lasso_grid_search.best_params_, math.sqrt(math.fabs(lasso_grid_search.best_score_)))
+score_dict = { 'Lasso' : math.sqrt(math.fabs(lasso_grid_search.best_score_))}
 
 ridge = Ridge()
-ridge_param_grid = { 'alpha': np.linspace(30,34, 300), 'max_iter' : [10000]}
+ridge_param_grid = { 'alpha': np.linspace(1,100, 300), 'max_iter' : [10000]}
 ridge_grid_search = GridSearchCV(ridge, ridge_param_grid, cv=5, scoring='neg_mean_squared_error', n_jobs=-1)
 ridge_grid_search.fit(X, y)
 
@@ -216,17 +216,18 @@ print(ridge_grid_search.best_params_, math.sqrt(math.fabs(ridge_grid_search.best
 
 score_dict['Ridge'] = math.sqrt(math.fabs(ridge_grid_search.best_score_))
 
-rf = RandomForestRegressor()
-rf_param_grid = { 'n_estimators' : [1000], 'max_features' : [148]}
-rf_grid_search = GridSearchCV(rf, rf_param_grid, cv=5, scoring='neg_mean_squared_error', n_jobs=-1)
-rf_grid_search.fit(X,y)
+# GBM
+gbm = GradientBoostingRegressor(max_features = 'sqrt', learning_rate = 0.01)
+gbm_param_grid = { 'n_estimators' : [840],'max_depth': [8], 'min_samples_leaf' : [6], 'subsample' : [0.85], 'min_samples_split' : [6]}
+gbm_grid_search = GridSearchCV(gbm, gbm_param_grid, cv=5, scoring='neg_mean_squared_error', n_jobs=-1)
+gbm_grid_search.fit(X,y)
 
-print(rf_grid_search.best_params_, math.sqrt(math.fabs(rf_grid_search.best_score_)))
+print(gbm_grid_search.best_params_, math.sqrt(math.fabs(gbm_grid_search.best_score_)))
 
-score_dict['Random Forest'] = math.sqrt(math.fabs(rf_grid_search.best_score_))
+score_dict['GBM'] = math.sqrt(math.fabs(gbm_grid_search.best_score_))
 
 svm = SVR()
-svm_param_grid = { 'gamma' : [0.00733333], 'C': np.linspace(1,1.1,10)}
+svm_param_grid = { 'gamma' : np.linspace(0.0001,0.001,100), 'C': [4]}
 svm_grid_search = GridSearchCV(svm, svm_param_grid, cv=5, scoring='neg_mean_squared_error', n_jobs=-1)
 svm_grid_search.fit(X,y)
 
@@ -235,7 +236,7 @@ print(svm_grid_search.best_params_, math.sqrt(math.fabs(svm_grid_search.best_sco
 score_dict['SVM'] = math.sqrt(math.fabs(svm_grid_search.best_score_))
 
 xgb_model = xgb.XGBRegressor()
-xgb_param_grid = { 'max_depth' : [4,5,6], 'eta' : [0.01], 'min_child_weight':[6], 'subsample': [0.5,1]}
+xgb_param_grid = {'learning_rate' : [0.01],'n_estimators' : [4000], 'max_depth' : [3], 'min_child_weight' : [5], 'gamma' : [0], 'subsample' : [0.7], 'colsample_bytree' : [0.8], 'reg_alpha':[0.00001]}
 xgb_grid_search = GridSearchCV(xgb_model, xgb_param_grid, cv=5, scoring='neg_mean_squared_error', n_jobs=-1)
 xgb_grid_search.fit(X,y)
 
@@ -243,9 +244,10 @@ print(xgb_grid_search.best_params_, math.sqrt(math.fabs(xgb_grid_search.best_sco
 
 score_dict['XGBoost'] = math.sqrt(math.fabs(xgb_grid_search.best_score_))
 
-# Predict using best model 
-svm_submission = pd.concat( [test.Id,pd.DataFrame(np.exp(svm_grid_search.predict(test_clean.drop('SalePrice', axis=1))))], axis=1)
+# Average the best five models to create a submission - 0.11784
+test_X = test_clean.drop('SalePrice',axis=1)
+test_Y = (np.exp(lasso_grid_search.predict(test_X)) + np.exp(ridge_grid_search.predict(test_X)) + np.exp(svm_grid_search.predict(test_X)) +  np.exp(xgb_grid_search.predict(test_X))) / 4
+avg_submission = pd.concat( [test.Id, pd.DataFrame(test_Y)], axis=1)
+avg_submission.columns = ['Id','SalePrice']
 
-svm_submission.columns = ['Id','SalePrice']
-
-svm_submission.to_csv('submissions/svm_submission.csv',index=False)
+avg_submission.to_csv('submissions/avg_submission.csv',index=False)
