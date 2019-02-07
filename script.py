@@ -4,11 +4,11 @@ import pandas as pd
 import math
 
 from sklearn.preprocessing import power_transform
-from sklearn.model_selection import GridSearchCV
-from sklearn.linear_model import Ridge, Lasso
+from sklearn.linear_model import Ridge, Lasso, LinearRegression
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.svm import SVR
 import xgboost as xgb
+from machine_learning import StackingAveragedModels
 
 train = pd.read_csv('input/train.csv')
 test = pd.read_csv('input/test.csv')
@@ -198,56 +198,19 @@ test_clean.drop(['Type_train', 'Type_test'], axis=1, inplace=True)
 X = train_clean.drop('SalePrice', axis=1)
 y = train_clean.SalePrice
 
-# Models - Lasso
-lasso = Lasso()
-lasso_param_grid = { 'alpha': np.linspace(0.0001,0.1, 300), 'max_iter' : [10000]}
-lasso_grid_search = GridSearchCV(lasso, lasso_param_grid, cv=5, scoring='neg_mean_squared_error', n_jobs=-1)
-lasso_grid_search.fit(X, y)
+# Instantiate the models that will be used along with CV-selected hyperparameters
+lasso = Lasso(alpha = 0.0004341137123745819, max_iter = 10000)
+ridge = Ridge(alpha = 35.103678929765884, max_iter = 10000)
+gbm = GradientBoostingRegressor(max_features = 'sqrt', learning_rate = 0.01, n_estimators = 840, max_depth = 8, min_samples_leaf= 6, subsample = 0.85, min_samples_split = 6)
+svm = SVR(C = 4, gamma = 0.0008727272727272727)
+xgb_model = xgb.XGBRegressor(learning_rate = 0.01, n_estimators = 4000, max_depth = 3, min_child_weight = 5, gamma = 0, subsample = 0.7, colsample_bytree = 0.8, reg_alpha = 0.00001)
 
-print(lasso_grid_search.best_params_, math.sqrt(math.fabs(lasso_grid_search.best_score_)))
-score_dict = { 'Lasso' : math.sqrt(math.fabs(lasso_grid_search.best_score_))}
+stack = StackingAveragedModels(base_models = [lasso, gbm, svm, xgb_model], meta_model=LinearRegression(), meta_cv = 5, meta_error = 'neg_mean_squared_error')
+stack.fit(X.values,y.values)
 
-ridge = Ridge()
-ridge_param_grid = { 'alpha': np.linspace(1,100, 300), 'max_iter' : [10000]}
-ridge_grid_search = GridSearchCV(ridge, ridge_param_grid, cv=5, scoring='neg_mean_squared_error', n_jobs=-1)
-ridge_grid_search.fit(X, y)
-
-print(ridge_grid_search.best_params_, math.sqrt(math.fabs(ridge_grid_search.best_score_)))
-
-score_dict['Ridge'] = math.sqrt(math.fabs(ridge_grid_search.best_score_))
-
-# GBM
-gbm = GradientBoostingRegressor(max_features = 'sqrt', learning_rate = 0.01)
-gbm_param_grid = { 'n_estimators' : [840],'max_depth': [8], 'min_samples_leaf' : [6], 'subsample' : [0.85], 'min_samples_split' : [6]}
-gbm_grid_search = GridSearchCV(gbm, gbm_param_grid, cv=5, scoring='neg_mean_squared_error', n_jobs=-1)
-gbm_grid_search.fit(X,y)
-
-print(gbm_grid_search.best_params_, math.sqrt(math.fabs(gbm_grid_search.best_score_)))
-
-score_dict['GBM'] = math.sqrt(math.fabs(gbm_grid_search.best_score_))
-
-svm = SVR()
-svm_param_grid = { 'gamma' : np.linspace(0.0001,0.001,100), 'C': [4]}
-svm_grid_search = GridSearchCV(svm, svm_param_grid, cv=5, scoring='neg_mean_squared_error', n_jobs=-1)
-svm_grid_search.fit(X,y)
-
-print(svm_grid_search.best_params_, math.sqrt(math.fabs(svm_grid_search.best_score_)))
-
-score_dict['SVM'] = math.sqrt(math.fabs(svm_grid_search.best_score_))
-
-xgb_model = xgb.XGBRegressor()
-xgb_param_grid = {'learning_rate' : [0.01],'n_estimators' : [4000], 'max_depth' : [3], 'min_child_weight' : [5], 'gamma' : [0], 'subsample' : [0.7], 'colsample_bytree' : [0.8], 'reg_alpha':[0.00001]}
-xgb_grid_search = GridSearchCV(xgb_model, xgb_param_grid, cv=5, scoring='neg_mean_squared_error', n_jobs=-1)
-xgb_grid_search.fit(X,y)
-
-print(xgb_grid_search.best_params_, math.sqrt(math.fabs(xgb_grid_search.best_score_)))
-
-score_dict['XGBoost'] = math.sqrt(math.fabs(xgb_grid_search.best_score_))
-
-# Average the best five models to create a submission - 0.11784
+# Create submission
 test_X = test_clean.drop('SalePrice',axis=1)
-test_Y = (np.exp(lasso_grid_search.predict(test_X)) + np.exp(ridge_grid_search.predict(test_X)) + np.exp(svm_grid_search.predict(test_X)) +  np.exp(xgb_grid_search.predict(test_X))) / 4
-avg_submission = pd.concat( [test.Id, pd.DataFrame(test_Y)], axis=1)
+avg_submission = pd.concat( [test.Id, pd.DataFrame(np.exp(stack.predict(test_X.values)))], axis=1)
 avg_submission.columns = ['Id','SalePrice']
 
-avg_submission.to_csv('submissions/avg_submission.csv',index=False)
+avg_submission.to_csv('submissions/stack_submission.csv',index=False)
