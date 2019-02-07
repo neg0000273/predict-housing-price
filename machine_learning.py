@@ -1,12 +1,16 @@
 from sklearn.base import BaseEstimator, RegressorMixin, TransformerMixin, clone
-from sklearn.model_selection import KFold
+from sklearn.model_selection import KFold, GridSearchCV
 import numpy as np
 
 class StackingAveragedModels(BaseEstimator, RegressorMixin, TransformerMixin):
-    def __init__(self, base_models, meta_model, cv=5):
+    def __init__(self, base_models, meta_model, meta_error, cv=5, meta_grid = {}, meta_cv = 5):
         self.base_models = base_models
         self.meta_model = meta_model
         self.cv = cv
+        self.meta_grid = meta_grid
+        self.meta_cv = meta_cv
+        self.meta_error = meta_error
+        self.meta_grid_search = GridSearchCV(self.meta_model, self.meta_grid, cv=self.meta_cv, scoring=self.meta_error, n_jobs=-1)
    
     # We again fit the data on clones of the original models
     def fit(self, X, y):
@@ -26,7 +30,7 @@ class StackingAveragedModels(BaseEstimator, RegressorMixin, TransformerMixin):
                 out_of_fold_predictions[holdout_index, i] = y_pred
                 
         # Now train the cloned  meta-model using the out-of-fold predictions as new feature
-        self.meta_model_.fit(out_of_fold_predictions, y)
+        self.meta_grid_search.fit(out_of_fold_predictions, y)
         return self
    
     #Do the predictions of all base models on the test data and use the averaged predictions as 
@@ -35,4 +39,4 @@ class StackingAveragedModels(BaseEstimator, RegressorMixin, TransformerMixin):
         meta_features = np.column_stack([
             np.column_stack([model.predict(X) for model in base_models]).mean(axis=1)
             for base_models in self.base_models_ ])
-        return self.meta_model_.predict(meta_features)
+        return self.meta_grid_search.predict(meta_features)
